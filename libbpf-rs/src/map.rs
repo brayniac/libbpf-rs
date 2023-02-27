@@ -389,7 +389,7 @@ impl Map {
                 null(),
                 keys.as_ptr() as *const c_void,
                 out.as_mut_ptr() as *mut c_void,
-                nkeys as u32 as *mut c_void,
+                nkeys as u32 as *mut __u32,
                 null(),
             )
         };

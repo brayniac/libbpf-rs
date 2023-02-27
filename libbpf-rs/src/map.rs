@@ -370,7 +370,7 @@ impl Map {
             return Ok(None)
         }
 
-        if nkeys > u32::MAX {
+        if nkeys > u32::MAX as usize {
             return Err(Error::InvalidInput(format!(
                 "number of keys exceeds maximum u32 {} > {}",
                 nkeys,
@@ -389,8 +389,8 @@ impl Map {
                 null(),
                 keys.as_ptr() as *const c_void,
                 out.as_mut_ptr() as *mut c_void,
-                nkeys as u32,
-                flags.bits,
+                nkeys as u32 as *mut c_void,
+                null(),
             )
         };
 

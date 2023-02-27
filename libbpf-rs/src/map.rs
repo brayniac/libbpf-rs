@@ -268,6 +268,24 @@ impl Map {
         self.lookup_raw(key, flags, out_size)
     }
 
+    /// Returns a batch of map values as `Vec` of `u8`.
+    ///
+    /// `key` must have exactly [`Map::key_size()`] elements.
+    ///
+    /// If the map is one of the per-cpu data structures, the function [`Map::lookup_percpu()`]
+    /// must be used.
+    pub fn lookup_batch(&self, keys: &[u8], flags: MapFlags) -> Result<Option<Vec<u8>>> {
+        if self.map_type().is_percpu() {
+            return Err(Error::InvalidInput(format!(
+                "lookup_percpu() must be used for per-cpu maps (type of the map is {})",
+                self.map_type(),
+            )));
+        }
+
+        let out_size = self.value_size() as usize;
+        self.lookup_batch_raw(keys, flags, out_size)
+    }
+
     /// Returns one value per cpu as `Vec` of `Vec` of `u8` for per per-cpu maps.
     ///
     /// For normal maps, [`Map::lookup()`] must be used.
@@ -312,6 +330,66 @@ impl Map {
                 self.fd,
                 key.as_ptr() as *const c_void,
                 out.as_mut_ptr() as *mut c_void,
+                flags.bits,
+            )
+        };
+
+        if ret == 0 {
+            unsafe {
+                out.set_len(out_size);
+            }
+            Ok(Some(out))
+        } else {
+            let errno = errno::errno();
+            if errno::Errno::from_i32(errno) == errno::Errno::ENOENT {
+                Ok(None)
+            } else {
+                Err(Error::System(errno))
+            }
+        }
+    }
+
+    /// Internal function to return a value from a map into a buffer of the given size.
+    fn lookup_batch_raw(&self, keys: &[u8], flags: MapFlags, out_size: usize) -> Result<Option<Vec<u8>>> {
+        let key_size = self.key_size() as usize;
+
+        // calculate the number of keys in the batch
+        let nkeys = keys.len() / key_size;
+
+        // check that the number of bytes is an integer number of keys
+        if nkeys * key_size != keys.len() {
+            return Err(Error::InvalidInput(format!(
+                "keys is not a multiple of key_size {} % {} != 0",
+                keys.len(),
+                self.key_size()
+            )));
+        }
+
+        // if number of keys is 0, early return
+        if nkeys == 0 {
+            return Ok(None)
+        }
+
+        if nkeys > u32::MAX {
+            return Err(Error::InvalidInput(format!(
+                "number of keys exceeds maximum u32 {} > {}",
+                nkeys,
+                u32::MAX,
+            )));
+        }
+
+        let out_bytes = out_size * nkeys;
+
+        let mut out: Vec<u8> = Vec::with_capacity(out_bytes);
+
+        let ret = unsafe {
+            libbpf_sys::bpf_map_lookup_batch(
+                self.fd,
+                null(),
+                null(),
+                keys.as_ptr() as *const c_void,
+                out.as_mut_ptr() as *mut c_void,
+                nkeys as u32,
                 flags.bits,
             )
         };
